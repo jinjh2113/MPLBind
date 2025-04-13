@@ -131,6 +131,292 @@ class DTA2(torch.nn.Module):
         x3 = self.LeakReLU(self.linear7(x3))#1
         return x3
 
+class DeepDTA(torch.nn.Module):
+    def __init__(self,n_feature, attention_weight1,dropout=0.1):
+        super(DeepDTA, self).__init__()
+        self.n_feature = n_feature
+        self.attention_weight1=attention_weight1
+        self.dropout = dropout
+        self.weight = Parameter(torch.Tensor(n_feature, n_feature))
+        self.bias = Parameter(torch.Tensor(n_feature))
+        self.linear1 = torch.nn.Linear(1162, 1024)
+        self.linear2 = torch.nn.Linear(1152, 1024)
+        self.linear3 = torch.nn.Linear(121, 128)
+        self.linear4 = torch.nn.Linear(1015, 1024)
+        self.linear5 = torch.nn.Linear(1024, 1024)
+        self.linear6 = torch.nn.Linear(1024, 512)
+        self.linear7 = torch.nn.Linear(512, 1)
+        #配体卷积
+        self.conv1 = nn.Sequential(
+            torch.nn.Conv1d(in_channels=1,out_channels=32,kernel_size=4,stride=1,padding=0),
+            torch.nn.Conv1d(in_channels=32,out_channels=64,kernel_size=4,stride=1,padding=0),
+            torch.nn.Conv1d(in_channels=64,out_channels=96,kernel_size=4,stride=1,padding=0),
+        )
+        ## 蛋白质卷积
+        self.conv2 = nn.Sequential(
+            torch.nn.Conv1d(in_channels=1,out_channels=32,kernel_size=4,stride=1,padding=0),
+            torch.nn.Conv1d(in_channels=32,out_channels=64,kernel_size=4,stride=1,padding=0),
+            torch.nn.Conv1d(in_channels=64,out_channels=96,kernel_size=4,stride=1,padding=0),
+        )
+
+        self.LeakReLU=torch.nn.LeakyReLU(negative_slope=5e-2)
+        self.attention = MultiHeadAttention(1024, 4, bias=True,activation=torch.nn.LeakyReLU(negative_slope=5e-2))
+
+    # forward 定义前向传播
+    def forward(self, x):
+        #输入进行mask
+        mask=(self.attention_weight1>0.0001).float()#权重大于0.0001的为1，其它为0
+        #约有一半被掩码，#shapevalue值过小的进行掩码，使用伯努利分布，有放回抽取attention_weight1.shape次，以np.minimum(0.95, attention_weight1*4000)概率为1，其它为0。
+        # mask=torch.from_numpy(np.random.binomial(1, np.minimum(0.95, attention_weight1*4000), attention_weight1.shape))
+        x=mask*x/(1-self.attention_weight1)#增强
+
+        ligand=x[:,:1162]#1162
+        target=x[:,1162:2186]#1024
+        mut=x[:,2186:]#121
+
+        ligand=self.LeakReLU(self.linear1(ligand))#1126->1024
+        ligand=self.conv1(ligand.view(ligand.size()[0],1,1024))#将二维数据转为三维(m*1024)->(m*1*1024);再通过三层卷积输出（m*96*1015）
+        ligand, ligandmax_indices =torch.max(ligand,dim=1)#96个通道取最大值，输出（m*1015）正数
+        # ligand, ligandmin_indices =torch.min(ligand,dim=1)#96个通道取最小值，输出（m*1015）负数
+        # ligand =torch.mean(ligand,dim=1)#96个通道取平均值，输出（m*1015）接近于0的正数
+        # ligand = self.attention(ligand[:,None, :], ligand[:,None, :], ligand[:,None, :])[:,0,:]
+
+        
+        mut=self.LeakReLU(self.linear3(mut))#121->128
+        target_mut=torch.cat([target,mut],1)#1152
+
+        target_mut=self.LeakReLU(self.linear2(target_mut))#1024
+        target_mut = self.conv2(target_mut.view(target_mut.size()[0],1,1024))
+        target_mut, target_mutmax_indices =torch.max(target_mut,dim=1)
+        # target_mut, target_mutmin_indices =torch.min(target_mut,dim=1)
+        # target_mut =torch.mean(target_mut,dim=1)
+
+        target_ligand1 = self.LeakReLU(self.linear7(self.LeakReLU(self.linear6(self.LeakReLU(self.linear5(self.LeakReLU(self.linear4(torch.add(ligand, target_mut)))))))))
+        target_ligand2=self.LeakReLU(self.linear7(self.LeakReLU(self.linear6(self.LeakReLU(self.linear5(self.LeakReLU(self.linear4(torch.mul(ligand,target_mut)))))))))#1024按元素乘
+        x3=target_ligand1+target_ligand2
+        return x3
+class DeepDTA2(torch.nn.Module):
+    def __init__(self,n_feature, attention_weight1,dropout=0.1):
+        super(DeepDTA2, self).__init__()
+        self.n_feature = n_feature
+        self.attention_weight1=attention_weight1
+        self.dropout = dropout
+        self.weight = Parameter(torch.Tensor(n_feature, n_feature))
+        self.bias = Parameter(torch.Tensor(n_feature))
+        self.linear1 = torch.nn.Linear(1162, 1024)
+        self.linear2 = torch.nn.Linear(1152, 1024)
+        self.linear3 = torch.nn.Linear(121, 128)
+        self.linear4 = torch.nn.Linear(1015, 1024)
+        self.linear5 = torch.nn.Linear(1024, 1024)
+        self.linear6 = torch.nn.Linear(1024, 512)
+        self.linear7 = torch.nn.Linear(512, 1)
+        #配体卷积
+        self.conv1 = nn.Sequential(
+            torch.nn.Conv1d(in_channels=1,out_channels=32,kernel_size=4,stride=1,padding=0),
+            torch.nn.Conv1d(in_channels=32,out_channels=64,kernel_size=4,stride=1,padding=0),
+            torch.nn.Conv1d(in_channels=64,out_channels=96,kernel_size=4,stride=1,padding=0),
+        )
+        ## 蛋白质卷积
+        self.conv2 = nn.Sequential(
+            torch.nn.Conv1d(in_channels=1,out_channels=32,kernel_size=4,stride=1,padding=0),
+            torch.nn.Conv1d(in_channels=32,out_channels=64,kernel_size=4,stride=1,padding=0),
+            torch.nn.Conv1d(in_channels=64,out_channels=96,kernel_size=4,stride=1,padding=0),
+        )
+
+        self.LeakReLU=torch.nn.LeakyReLU(negative_slope=5e-2)
+        self.attention1 = MultiHeadAttention(1015, 5, bias=True,activation=torch.nn.LeakyReLU(negative_slope=5e-2))
+        self.attention2 = MultiHeadAttention(1015, 5, bias=True,activation=torch.nn.LeakyReLU(negative_slope=5e-2))
+
+    # forward 定义前向传播
+    def forward(self, x):
+        #输入进行mask
+        mask=(self.attention_weight1>0.0001).float()#权重大于0.0001的为1，其它为0
+        #约有一半被掩码，#shapevalue值过小的进行掩码，使用伯努利分布，有放回抽取attention_weight1.shape次，以np.minimum(0.95, attention_weight1*4000)概率为1，其它为0。
+        # mask=torch.from_numpy(np.random.binomial(1, np.minimum(0.95, attention_weight1*4000), attention_weight1.shape))
+        x=mask*x/(1-self.attention_weight1)#增强
+
+        ligand=x[:,:1162]#1162
+        target=x[:,1162:2186]#1024
+        mut=x[:,2186:]#121
+
+        ligand=self.LeakReLU(self.linear1(ligand))#1126->1024
+        ligand=self.conv1(ligand.view(ligand.size()[0],1,1024))#将二维数据转为三维(m*1024)->(m*1*1024);再通过三层卷积输出（m*96*1015）
+        ligand, ligandmax_indices =torch.max(ligand,dim=1)#96个通道取最大值，输出（m*1015）正数
+        # ligand, ligandmin_indices =torch.min(ligand,dim=1)#96个通道取最小值，输出（m*1015）负数
+        # ligand =torch.mean(ligand,dim=1)#96个通道取平均值，输出（m*1015）接近于0的正数
+        # ligand = self.attention(ligand[:,None, :], ligand[:,None, :], ligand[:,None, :])[:,0,:]
+        ligand = self.attention1(ligand[:,None, :], ligand[:,None, :], ligand[:,None, :])[:,0,:]
+
+        
+        mut=self.LeakReLU(self.linear3(mut))#121->128
+        target_mut=torch.cat([target,mut],1)#1152
+
+        target_mut=self.LeakReLU(self.linear2(target_mut))#1024
+        target_mut = self.conv2(target_mut.view(target_mut.size()[0],1,1024))
+        target_mut, target_mutmax_indices =torch.max(target_mut,dim=1)
+        # target_mut, target_mutmin_indices =torch.min(target_mut,dim=1)
+        # target_mut =torch.mean(target_mut,dim=1)
+        target_mut = self.attention2(target_mut[:,None, :], target_mut[:,None, :], target_mut[:,None, :])[:,0,:]
+
+        target_ligand1 = self.LeakReLU(self.linear7(self.LeakReLU(self.linear6(self.LeakReLU(self.linear5(self.LeakReLU(self.linear4(torch.add(ligand, target_mut)))))))))
+        target_ligand2=self.LeakReLU(self.linear7(self.LeakReLU(self.linear6(self.LeakReLU(self.linear5(self.LeakReLU(self.linear4(torch.mul(ligand,target_mut)))))))))#1024按元素乘
+        x3=target_ligand1+target_ligand2
+        return x3
+
+class DTA3(torch.nn.Module):
+    def __init__(self,n_feature, attention_weight1,dropout=0.1):
+        super(DTA3, self).__init__()
+        self.n_feature = n_feature
+        self.attention_weight1=attention_weight1
+        self.dropout = dropout
+        self.weight = Parameter(torch.Tensor(n_feature, n_feature))
+        self.bias = Parameter(torch.Tensor(n_feature))
+        # self.dropconnectlayer=DropConnect(2307, 2307,drop_prob=0.4)
+        # self.dropconnectlayer1=DropConnect(1162, 1024,drop_prob=attention_weight1[:1162])
+        # self.dropconnectlayer5=DropConnect(1024, 1024,drop_prob=attention_weight1[1162:2186])
+        # self.dropconnectlayer3=DropConnect(121, 128,drop_prob=attention_weight1[2186:])
+        self.linear1 = torch.nn.Linear(1162, 1024)
+        self.linear2 = torch.nn.Linear(1152, 1024)
+        self.linear3 = torch.nn.Linear(121, 128)
+        self.linear4 = torch.nn.Linear(512, 128)
+        self.linear5 = torch.nn.Linear(1024, 1024)
+        self.linear6 = torch.nn.Linear(1024, 512)
+        self.linear7 = torch.nn.Linear(128, 1)
+        self.LeakReLU=torch.nn.LeakyReLU(negative_slope=5e-2)
+        self.attention = MultiHeadAttention(1024, 4, bias=True,activation=torch.nn.LeakyReLU(negative_slope=5e-2))
+
+    # forward 定义前向传播
+    def forward(self, x):
+        #输入进行mask
+        mask=(self.attention_weight1>0.0001).float()#权重大于0.0001的为1，其它为0
+        #约有一半被掩码，#shapevalue值过小的进行掩码，使用伯努利分布，有放回抽取attention_weight1.shape次，以np.minimum(0.95, attention_weight1*4000)概率为1，其它为0。
+        # mask=torch.from_numpy(np.random.binomial(1, np.minimum(0.95, attention_weight1*4000), attention_weight1.shape))
+        x=mask*x/(1-self.attention_weight1)#增强
+
+        #链接边weight进行mask
+        # x=self.dropconnectlayer(x)
+
+        ligand=x[:,:1162]#1162
+        target=x[:,1162:2186]#1024
+        mut=x[:,2186:]#121
+
+        # ligand = F.dropout(ligand, 0.0, training=True)#10%输入改为0
+        # target = F.dropout(target, 0.0, training=True)#1024
+        # mut = F.dropout(mut, 0.0, training=True)
+
+        ligand=self.LeakReLU(self.linear5(self.LeakReLU(self.linear1(ligand))))#1126->1024
+        ligand = self.attention(ligand[:,None, :], ligand[:,None, :], ligand[:,None, :])[:,0,:]
+
+        target = self.LeakReLU(self.linear5(target))  #1024->1024
+        mut=self.LeakReLU(self.linear3(mut))#121->128
+        target_mut=torch.cat([target,mut],1)#1152
+
+        target_mut=self.LeakReLU(self.linear5(self.LeakReLU(self.linear2(target_mut))))#1024
+        target_mut = self.attention(target_mut[:,None, :], target_mut[:,None, :], target_mut[:,None, :])[:,0,:]
+
+        target_ligand1 = self.LeakReLU(self.linear7(self.LeakReLU(self.linear4(self.LeakReLU(self.linear6(self.LeakReLU(self.linear5(torch.add(ligand, target_mut)))))))))
+        target_ligand2=self.LeakReLU(self.linear7(self.LeakReLU(self.linear4(self.LeakReLU(self.linear6(self.LeakReLU(self.linear5(torch.mul(ligand,target_mut)))))))))#1024按元素乘
+        x3=target_ligand1+target_ligand2
+        return x3
+
+class DTA4(torch.nn.Module):
+    def __init__(self,n_feature, attention_weight1,dropout=0.1):
+        super(DTA4, self).__init__()
+        self.n_feature = n_feature
+        self.linear1 = torch.nn.Linear(1162, 1024)
+        self.linear2 = torch.nn.Linear(1152, 1024)
+        self.linear3 = torch.nn.Linear(121, 128)
+        self.linear4 = torch.nn.Linear(512, 128)
+        self.linear5 = torch.nn.Linear(1024, 1024)
+        self.linear6 = torch.nn.Linear(1024, 512)
+        self.linear7 = torch.nn.Linear(128, 1)
+        self.LeakReLU=torch.nn.LeakyReLU(negative_slope=5e-2)
+        self.attention = MultiHeadAttention(1024, 4, bias=True,activation=torch.nn.LeakyReLU(negative_slope=5e-2))
+
+    # forward 定义前向传播
+    def forward(self, x):
+        #输入进行mask
+        mask=(self.attention_weight1>0.0001).float()#权重大于0.0001的为1，其它为0
+        x=mask*x/(1-self.attention_weight1)#增强
+
+        ligand=x[:,:1162]#1162
+        target=x[:,1162:2186]#1024
+        mut=x[:,2186:]#121
+
+        # ligand = F.dropout(ligand, 0.0, training=True)#10%输入改为0
+        # target = F.dropout(target, 0.0, training=True)#1024
+        # mut = F.dropout(mut, 0.0, training=True)
+
+        ligand=self.LeakReLU(self.linear5(self.LeakReLU(self.linear1(ligand))))#1126->1024
+        ligand = self.attention(ligand[:,None, :], ligand[:,None, :], ligand[:,None, :])[:,0,:]
+
+        target = self.LeakReLU(self.linear5(target))  #1024->1024
+        mut=self.LeakReLU(self.linear3(mut))#121->128
+        target_mut=torch.cat([target,mut],1)#1152
+
+        target_mut=self.LeakReLU(self.linear5(self.LeakReLU(self.linear2(target_mut))))#1024
+        target_mut = self.attention(target_mut[:,None, :], target_mut[:,None, :], target_mut[:,None, :])[:,0,:]
+
+        target_ligand1 = self.LeakReLU(self.linear7(self.LeakReLU(self.linear4(self.LeakReLU(self.linear6(self.LeakReLU(self.linear5(torch.add(ligand, target_mut)))))))))
+        target_ligand2=self.LeakReLU(self.linear7(self.LeakReLU(self.linear4(self.LeakReLU(self.linear6(self.LeakReLU(self.linear5(torch.mul(ligand,target_mut)))))))))#1024按元素乘
+        x3=target_ligand1+target_ligand2
+        return x3
+
+class DTA5(torch.nn.Module):
+    def __init__(self,n_feature, attention_weight1,dropout=0.1):
+        super(DTA5, self).__init__()
+        self.n_feature = n_feature
+        self.attention_weight1 = attention_weight1
+        self.linear1 = torch.nn.Linear(1162, 1024)
+        self.linear2 = torch.nn.Linear(1152, 1024)
+        self.linear3 = torch.nn.Linear(121, 128)
+        self.linear4 = torch.nn.Linear(512, 128)
+        self.linear5 = torch.nn.Linear(1024, 1024)
+        self.linear6 = torch.nn.Linear(1024, 512)
+        self.linear7 = torch.nn.Linear(128, 1)
+        self.linear8 = torch.nn.Linear(1, 1)
+        self.LeakReLU=torch.nn.LeakyReLU(negative_slope=5e-2)
+        self.attention = MultiHeadAttention(1024, 4, bias=True,activation=torch.nn.LeakyReLU(negative_slope=5e-2))
+
+    # forward 定义前向传播
+    def forward(self, x):
+        #输入进行mask
+        mask=(self.attention_weight1>0.0001).float()#权重大于0.0001的为1，其它为0
+        x=mask*x/(1-self.attention_weight1)#增强
+
+        ligand=x[:,:1162]#1162
+        target=x[:,1162:2186]#1024
+        mut=x[:,2186:]#121
+
+        # ligand = F.dropout(ligand, 0.0, training=True)#10%输入改为0
+        # target = F.dropout(target, 0.0, training=True)#1024
+        # mut = F.dropout(mut, 0.0, training=True)
+
+        ligand=self.LeakReLU(self.linear5(self.LeakReLU(self.linear1(ligand))))#1126->1024
+        ligand = self.attention(ligand[:,None, :], ligand[:,None, :], ligand[:,None, :])[:,0,:]
+
+        target = self.LeakReLU(self.linear5(target))  #1024->1024
+        mut=self.LeakReLU(self.linear3(mut))#121->128
+        target_mut=torch.cat([target,mut],1)#1152
+
+        target_mut=self.LeakReLU(self.linear5(self.LeakReLU(self.linear2(target_mut))))#1024
+        target_mut = self.attention(target_mut[:,None, :], target_mut[:,None, :], target_mut[:,None, :])[:,0,:]
+
+        target_ligand1 = self.LeakReLU(self.linear7(self.LeakReLU(self.linear4(self.LeakReLU(self.linear6(self.LeakReLU(self.linear5(torch.add(ligand, target_mut)))))))))
+        target_ligand2 = self.LeakReLU(self.linear7(self.LeakReLU(self.linear4(self.LeakReLU(self.linear6(self.LeakReLU(self.linear5(torch.mul(ligand,target_mut)))))))))#1024按元素乘
+        
+        target_ligand3=torch.zeros(ligand.shape[0],1)
+        # print(target_ligand3.shape)
+        for i in range(ligand.shape[0]):
+            # print(i)
+            # print(ligand[i,:])
+            # print(target[i,:])
+            target_ligand3[i,0] = torch.dot(ligand[i,:],target_mut[i,:])#
+        target_ligand3=self.linear8(target_ligand3)
+        # target_ligand3 = self.linear8(torch.mm(ligand,target_mut.t()))#内存不够
+        x3=target_ligand1+target_ligand2+target_ligand3
+        return x3
+
 #由于多头注意力中必须batchsize，全部输入测试时候内存不够，测试数据集也需要拆分
 def train(torch_traindataset,torch_testdataset,filename,model):
     trainloader = torch.utils.data.DataLoader(
@@ -144,7 +430,6 @@ def train(torch_traindataset,torch_testdataset,filename,model):
         batch_size=512,  # 每批提取的数量
         shuffle=True,  # 要不要打乱数据（打乱比较好）# num_workers=2  # 多少线程来读取数据
     )
-    # model = DTA2(2307)
     optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
     criteon = torch.nn.MSELoss(reduction="mean")
     kl = nn.KLDivLoss(reduction='batchmean')
@@ -163,11 +448,8 @@ def train(torch_traindataset,torch_testdataset,filename,model):
         test_pre=torch.tensor([[0]])
         for step, (test_X1, test_Y1) in enumerate(testloader):
             test_X1, test_Y1 = test_X1.to(torch.float32), test_Y1.to(torch.float32)
-            # print('step',step,'test_X1', torch.isnan(test_X1).any())
             testpredictions = model(test_X1)
-            # print('step',step,'testpredictions', torch.isnan(testpredictions).any())
             test_pre=torch.cat((test_pre,testpredictions),dim=0)
-            # print('step',step,'test_pre', torch.isnan(test_pre).any())
             test_Y=torch.cat((test_Y,test_Y1),dim=0)
         test_Y=test_Y[1:,:]
         test_pre =test_pre[1:,:]
@@ -203,31 +485,58 @@ def train(torch_traindataset,torch_testdataset,filename,model):
     print(result)
     return model,float(result[7])
 
-if __name__ == "__main__":
-    attention_weight=pd.read_csv("./JJH/2307feature_importances_df0621.csv",index_col=0)
-    attention_weight.sort_index(inplace=True)
-    attention_weight1 = torch.from_numpy(attention_weight['importance'].values).to(torch.float32)
+def test(torch_testdataset,filename,model):
+    testloader = torch.utils.data.DataLoader(
+        dataset=torch_testdataset,
+        batch_size=512,  # 每批提取的数量
+        shuffle=True,  # 要不要打乱数据（打乱比较好）# num_workers=2  # 多少线程来读取数据
+    )
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    criteon = torch.nn.MSELoss(reduction="mean")
+    kl = nn.KLDivLoss(reduction='batchmean')
+    bestloss=0.5
+    for epoch in range(100):
+        model.eval()
+        test_Y=torch.tensor([[0]])
+        test_pre=torch.tensor([[0]])
+        for step, (test_X1, test_Y1) in enumerate(testloader):
+            test_X1, test_Y1 = test_X1.to(torch.float32), test_Y1.to(torch.float32)
+            testpredictions = model(test_X1)
+            test_pre=torch.cat((test_pre,testpredictions),dim=0)
+            test_Y=torch.cat((test_Y,test_Y1),dim=0)
+        test_Y=test_Y[1:,:]
+        test_pre =test_pre[1:,:]
+        # 评价
+        loss = criteon(test_pre, test_Y)+kl(test_pre, test_Y)
+        #检查错误
+        # print('test_pre',torch.isnan(test_pre).any())
+        # print('test_Y',torch.isnan(test_Y).any())
+        pearson = pearsonr(test_Y.detach().numpy().flatten(), test_pre.detach().numpy().flatten())[0]
+        r2 = metrics.r2_score(test_Y.detach().numpy(), test_pre.detach().numpy())
+        mae = metrics.mean_absolute_error(test_Y.detach().numpy(), test_pre.detach().numpy())
+        mse = metrics.mean_squared_error(test_Y.detach().numpy(), test_pre.detach().numpy())
+        rmse = np.sqrt(metrics.mean_squared_error(test_Y.detach().numpy(), test_pre.detach().numpy()))
+        rae = metrics.mean_absolute_error(test_Y.detach().numpy(), test_pre.detach().numpy()) / metrics.mean_absolute_error(
+            test_Y.detach().numpy(), [test_Y.detach().numpy().mean()] * len(test_Y.detach().numpy()))
+        rrse = np.sqrt(metrics.mean_squared_error(test_Y.detach().numpy(), test_pre.detach().numpy())) / np.sqrt(
+            metrics.mean_squared_error(test_Y.detach().numpy(), [test_Y.detach().numpy().mean()] * len(test_Y.detach().numpy())))
+        print('loss:', loss, 'epoch:', epoch, 'r2', r2,'r', pearson, 'mse:', mse, 'mae:', mae, 'rmse:', rmse, 'rae:', rae,
+              'rrse:', rrse)
+        # 输出
+        pred_dict = torch.cat([test_Y, test_pre], 1).detach().numpy()
+        pred_df = pd.DataFrame(pred_dict, columns=['observed', 'predicted'])
+        pred_df.to_csv("./JJH/predictions/DTA_att_all_EL2/"+filename+"/"+filename+"_epoch"+str(epoch)+"_r2"+str(r2)+"_r"+str(pearson)+"_mse"+str(mse)+"_mae"+str(mae)+"_r2"+str(r2)+".csv", encoding="utf-8", index=False)
+        
+    print(result)
+    return model,float(result[7])
 
-    #test
-    test_df = pd.read_csv('F:\OneDrive\PHD\CODE\PSnpBind-ML-notebook-main\JJH\data\\all\\test_fold0.csv',index_col=0)
-    test_Y = torch.from_numpy(test_df[['ba']].values)#111292*1
+def getdata(trainfilename):
+    train_df = pd.read_csv(trainfilename,index_col=0)  # 445168*2307
+    train_df.sort_index(inplace=True)
+    train_Y = torch.from_numpy(train_df[['ba']].values)  # 445168*1
 
-    test_X_df = test_df.drop(['pdb', 'variant fold name','ligand_file', 'chembl_id', 'tanimoto_index', 'ba','RuleOfFiveDescriptor'], axis=1)
-    test_X=torch.from_numpy(test_X_df.values)#56381*2307
-
-    alltestmin_values = torch.min(test_X, dim=0).values
-    alltestmax_values = torch.max(test_X, dim=0).values
-    # 对张量进行最小-最大归一化，需要注意分母不能为0
-    test_X_normal = (test_X - alltestmin_values) / (alltestmax_values - alltestmin_values)
-    test_X_normal = torch.where(torch.isnan(test_X_normal), torch.full_like(test_X_normal, 0), test_X_normal)
-    test_X_normal,test_Y=test_X_normal.to(torch.float32),test_Y.to(torch.float32)
-
-    #训练
-    train_df = pd.read_csv('F:\OneDrive\PHD\CODE\PSnpBind-ML-notebook-main\JJH\data\\all\\train_fold0.txt',index_col=0)#445168*2307
-    train_Y = torch.from_numpy(train_df[['ba']].values)#445168*1
-
-    train_X_df = train_df.drop(['pdb', 'variant fold name','ligand_file', 'chembl_id', 'tanimoto_index', 'ba','RuleOfFiveDescriptor'], axis=1)
-    train_X=torch.from_numpy(train_X_df.values)#445168*2307
+    train_X_df = train_df.drop(['pdb', 'variant fold name', 'ligand_file', 'chembl_id', 'tanimoto_index', 'ba', 'RuleOfFiveDescriptor'],axis=1)
+    train_X = torch.from_numpy(train_X_df.values)  # 445168*2307
 
     # 沿着列的维度找到最小值和最大值
     alltrainmin_values = torch.min(train_X, dim=0).values
@@ -235,243 +544,22 @@ if __name__ == "__main__":
     # 对张量进行最小-最大归一化，需要注意分母不能为0
     train_X_normal = (train_X - alltrainmin_values) / (alltrainmax_values - alltrainmin_values)
     train_X_normal = torch.where(torch.isnan(train_X_normal), torch.full_like(train_X_normal, 0), train_X_normal)
-    train_X_normal,train_Y=train_X_normal.to(torch.float32),train_Y.to(torch.float32)
+    train_X_normal, train_Y = train_X_normal.to(torch.float32), train_Y.to(torch.float32)
+    return train_X_normal, train_Y
+if __name__ == "__main__":
+    attention_weight=pd.read_csv("./JJH/2307feature_importances_df0621.csv",index_col=0)
+    attention_weight.sort_index(inplace=True)
+    attention_weight1 = torch.from_numpy(attention_weight['importance'].values).to(torch.float32)
 
-    torch_dataset1 = torch.utils.data.TensorDataset(train_X_normal, train_Y)
-    torch_dataset2 = torch.utils.data.TensorDataset(test_X_normal, test_Y)
+    for i in range(5):
+        test_X_normal2, test_Y2 = getdata('./data/all/test_fold'+str(i)+'.csv')
+        valid_X_normal2, valid_Y2 = getdata('./data/all/valid_fold'+str(i)+'.csv')
+        train_X_normal2,train_Y2=getdata('./data/all/train_fold'+str(i)+'.csv')#445168*2307
+    
+        torch_dataset1 = torch.utils.data.TensorDataset(train_X_normal, train_Y)
+        torch_dataset2 = torch.utils.data.TensorDataset(valid_X_normal, valid_Y)
+        torch_dataset3 = torch.utils.data.TensorDataset(test_X_normal, test_Y)
 
-
-    model = DTA(2307,attention_weight1)
-    # model2,r=train(torch_dataset1, torch_dataset2, 'all',model)
-    # model2,r=train(torch_dataset1, torch_dataset2, 'all2',model)
-    model3,r=train(torch_dataset1, torch_dataset2, 'all3',model)
-
-# model.load_state_dict(torch.load('.\JJH\predictions\DTA1_att_all\DTA1_att_allbest_r0.9428071537251386_mse0.24741241.mdl'))
-# model5,r=train(torch_dataset1, torch_dataset2, 'DTA1_att_all',model)#'epoch:', '96', 'r2:', '0.8791940037383494', 'r:', '0.9380121018609306', 'mse:', '0.26759967'
-# model5,r=train(torch_dataset1, torch_dataset2, 'DTA1_att_all',model5)#'epoch:', '145', 'r2:', '0.8883073998138852', 'r:', '0.9428071537251386', 'mse:', '0.24741241'
-# model5,r=train(torch_dataset1, torch_dataset2, 'DTA1_att_all',model)#'epoch:', '248', 'r2:', '0.8990021658610233', 'r:', '0.9481622293446534', 'mse:', '0.22372225'
-# model5,r=train(torch_dataset1, torch_dataset2, 'DTA1_att_all',model5)# 'epoch:', '336', 'r2:', '0.9041451142025827', 'r:', '0.950974921454823', 'mse:', '0.21232998'
-# model5,r=train(torch_dataset1, torch_dataset2, 'DTA1_att_all',model5)# 'epoch:', '445', 'r2:', '0.9081134132935856', 'r:', '0.9531907406584055', 'mse:', '0.20353971', 'mae:', '0.32841396'
-#
-# model1 = DTA2(2307)
-# model4,r=train(torch_dataset1, torch_dataset2, 'DTA2_att_all2',model1)#都有激活函数，添加不同dropout，'epoch:', '48', 'r2:', '0.8555881850986917', 'r:', '0.9263085425980399', 'mse:', '0.31988934', 'mae:', '0.41961625'
-# model4,r=train(torch_dataset1, torch_dataset2, 'DTA2_att_all2',model4)#'epoch:', '94', 'r2:', '0.8708470760761808', 'r:', '0.9340619621118914', 'mse:', '0.2860891', 'mae:', '0.38799724'
-#
-# model,r=train(torch_dataset1, torch_dataset2, 'DTA2_att_all')
-# model3,r=train(torch_dataset1, torch_dataset2, 'DTA2_att_all',model)#'epoch:', '146', 'r2:', '0.8849684121187987', 'r:', '0.9408260576555671', 'mse:', '0.25480866', 'mae:', '0.3610897'
-#
-# #集成学习，训练几个model，再集成学习
-# model6,r=train(torch_dataset3, torch_dataset4, 'DTA2_att_all',model)
-#
-# pdb=["1owh","2c3i","2hb1","2y5h","3jvr","4dli","4e5w","4jia","4m0y","4twp",
-#          "5a7b","3udh","5c28","4wiv","3b5r","3b27","3fv1","3pxf","3u9q","3up2",
-#          "2pog", "2weg", "4gr0", "4j21", "3utu","4crc"]
-# #检测个数
-# for i in pdb:
-#     test__i_num=test_df.loc[test_df['pdb']==i].shape[0]
-#     train_i_num=train_df.loc[train_df['pdb']==i].shape[0]
-#     print('pdb',i,'train_num:',train_i_num,'test_num',test__i_num)
-#
-# def getr(test_df,train_df):
-#     rlist=[]
-#     for i in ['3up2','3fv1']:
-#         train_i=train_df.loc[train_df['pdb']==i]
-#         train_Yi = torch.from_numpy(train_i[['ba']].values)
-#         train_Xi=train_i.drop(['pdb', 'variant fold name','ligand_file', 'chembl_id', 'tanimoto_index', 'ba','RuleOfFiveDescriptor'], axis=1)
-#         train_Xi = torch.from_numpy(train_Xi.values)
-#         # 对张量进行最小-最大归一化，需要注意分母不能为0
-#         trainmin_values = torch.min(train_Xi, dim=0).values
-#         trainmax_values = torch.max(train_Xi, dim=0).values
-#         train_Xi_normal = (train_Xi - trainmin_values) / (trainmax_values - trainmin_values)
-#         train_Xi_normal = torch.where(torch.isnan(train_Xi_normal), torch.full_like(train_Xi_normal, 0), train_Xi_normal)
-#         train_Xi_normal, train_Yi = train_Xi_normal.to(torch.float32), train_Yi.to(torch.float32)
-#
-#         test_i=test_df.loc[test_df['pdb']==i]
-#         test_Yi = torch.from_numpy(test_i[['ba']].values)
-#         test_Xi=test_i.drop(['pdb', 'variant fold name','ligand_file', 'chembl_id', 'tanimoto_index', 'ba','RuleOfFiveDescriptor'], axis=1)
-#         test_Xi = torch.from_numpy(test_Xi.values)
-#         # 对张量进行最小-最大归一化，需要注意分母不能为0
-#         testmin_values = torch.min(test_Xi, dim=0).values
-#         testmax_values = torch.max(test_Xi, dim=0).values
-#         test_Xi_normal = (test_Xi - testmin_values) / (testmax_values - testmin_values)
-#         test_Xi_normal = torch.where(torch.isnan(test_Xi_normal), torch.full_like(test_Xi_normal, 0), test_Xi_normal)
-#         test_Xi_normal, test_Yi = test_Xi_normal.to(torch.float32), test_Yi.to(torch.float32)
-#
-#         torch_dataset_train = torch.utils.data.TensorDataset(train_Xi_normal, train_Yi)
-#         torch_dataset_test = torch.utils.data.TensorDataset(test_Xi_normal, test_Yi)
-#         model = DTA(2307)
-#         modeli, r = train(torch_dataset_train, torch_dataset_test, str(i), model)
-#         rlist.append(r)
-#
-#         test_pre = model(test_Xi_normal)
-#         #评价指标
-#         pearson = pearsonr(test_Yi.detach().numpy().flatten(), test_pre.detach().numpy().flatten())[0]
-#         # pdbrvalue.append(pearson)
-#         r2 = metrics.r2_score(test_Yi.detach().numpy(), test_pre.detach().numpy())
-#         mae = metrics.mean_absolute_error(test_Yi.detach().numpy(), test_pre.detach().numpy())
-#         mse = metrics.mean_squared_error(test_Yi.detach().numpy(), test_pre.detach().numpy())
-#         rmse = np.sqrt(metrics.mean_squared_error(test_Yi.detach().numpy(), test_pre.detach().numpy()))
-#         rae = metrics.mean_absolute_error(test_Yi.detach().numpy(), test_pre.detach().numpy()) / metrics.mean_absolute_error(
-#             test_Yi.detach().numpy(), [test_Yi.detach().numpy().mean()] * len(test_Yi.detach().numpy()))
-#         rrse = np.sqrt(metrics.mean_squared_error(test_Yi.detach().numpy(), test_pre.detach().numpy())) / np.sqrt(
-#             metrics.mean_squared_error(test_Yi.detach().numpy(),
-#                                        [test_Yi.detach().numpy().mean()] * len(test_Yi.detach().numpy())))
-#         print("==================================pdb ressult==================================================")
-#         print('pdb:',i,  'r2', r2, 'r', pearson, 'mse:', mse, 'mae:', mae, 'rmse:', rmse, 'rae:', rae,
-#               'rrse:', rrse)
-#     return (r)
-# rlist = getr(test_df, train_df)
-#         #绘图预测和真实值的对比散点图
-#         # plt.figure(figsize=(6, 6))
-#         # plt.scatter(test_Yi.detach().numpy().flatten(), test_pre.detach().numpy().flatten())
-#         # plt.title(str(i))
-#         # plt.xlabel('Experimental Binding Affinity (kcal/mol$^-1$)')
-#         # plt.ylabel('Predicted Binding Affinity (kcal/mol$^-1$)')
-#         # plt.savefig('.\JJH\\figure\\predicted_binding_r_train_'+str(i)+'.tiff',dpi=300)
-#         # plt.show()
-#         # plt.close()
-#
-#         # 绘制亲和力分布分布图
-#         # bincount = int((max(dockingdf.loc[:, 'ba'].tolist()) - min(dockingdf.loc[:, 'ba'].tolist())) * 2)
-#         plt.hist(train_Yi.detach().numpy().flatten(), edgecolor='black', color='grey')
-#         plt.xlabel('Binding Affinity (kcal/mol$^-1$)')
-#         plt.ylabel('Frequency')
-#         plt.title("Histogram of binding affinity values")
-#         # plt.savefig('.\JJH\\figure\\bindingfrequencyall.tiff', dpi=300)
-#         plt.show()
-#         plt.close()
-#
-# #结果不好的pdb的实验
-# i='4e5w'
-# train_i=train_df.loc[train_df['pdb']==i]
-# train_Yi = torch.from_numpy(train_i[['ba']].values)
-# train_Xi=train_i.drop(['pdb', 'variant fold name','ligand_file', 'chembl_id', 'tanimoto_index', 'ba','RuleOfFiveDescriptor'], axis=1)
-# train_Xi = torch.from_numpy(train_Xi.values)
-# # 对张量进行最小-最大归一化，需要注意分母不能为0
-# # 沿着列的维度找到最小值和最大值
-# min_values = torch.min(train_Xi, dim=0).values
-# max_values = torch.max(train_Xi, dim=0).values
-# train_Xi_normal = (train_Xi - min_values) / (max_values - min_values)
-# # train_Xi_normal = (train_Xi - trainmin_values) / (trainmax_values - trainmin_values)
-# train_Xi_normal = torch.where(torch.isnan(train_Xi_normal), torch.full_like(train_Xi_normal, 0), train_Xi_normal)
-# train_Xi_normal, train_Yi = train_Xi_normal.to(torch.float32), train_Yi.to(torch.float32)
-#
-# test_i=test_df.loc[test_df['pdb']==i]
-# test_Yi = torch.from_numpy(test_i[['ba']].values)
-# test_Xi=test_i.drop(['pdb', 'variant fold name','ligand_file', 'chembl_id', 'tanimoto_index', 'ba','RuleOfFiveDescriptor'], axis=1)
-# test_Xi = torch.from_numpy(test_Xi.values)
-# testmin_values = torch.min(test_Xi, dim=0).values
-# testmax_values = torch.max(test_Xi, dim=0).values
-# # 对张量进行最小-最大归一化，需要注意分母不能为0
-# test_Xi_normal = (test_Xi - testmin_values) / (testmax_values - testmin_values)
-# test_Xi_normal = torch.where(torch.isnan(test_Xi_normal), torch.full_like(test_Xi_normal, 0), test_Xi_normal)
-# test_Xi_normal, test_Yi = test_Xi_normal.to(torch.float32), test_Yi.to(torch.float32)
-#
-# torch_dataset_train = torch.utils.data.TensorDataset(train_Xi_normal, train_Yi)
-# torch_dataset_test = torch.utils.data.TensorDataset(test_Xi_normal, test_Yi)#'epoch:', '99', 'r2:', '0.025613112958933315', 'r:', '0.49191204120872634', 'mse:', '0.3619041'
-#
-# torch_dataset_train2 = torch.utils.data.TensorDataset(train_Xi, train_Yi)#
-# torch_dataset_test2 = torch.utils.data.TensorDataset(test_Xi, test_Yi)
-# model = DTA(2307)
-# model2, r = train(torch_dataset_train, torch_dataset_test, str(i), model)#batchsize=100,epoch: 99 r2 0.020069249015356005 r 0.5048059753302647 mse: 0.3639632 mae: 0.48572978
-# model3, r = train(torch_dataset_train, torch_dataset_test, str(i), model2)#'epoch:', '298', 'r2:', '0.4114451128976844', 'r:', '0.6452083132641111', 'mse:', '0.21859944', 'mae:', '0.35592622'
-# model4, r = train(torch_dataset_train, torch_dataset_test, str(i), model3)#'epoch:', '575', 'r2:', '0.5707600363279413', 'r:', '0.7556209707691005', 'mse:', '0.15942714', 'mae:', '0.29861078'
-# model5, r = train(torch_dataset_train, torch_dataset_test, str(i), model4)#'epoch:', '798', 'r2:', '0.6019389935931829', 'r:', '0.7758860095544196', 'mse:', '0.14784673', 'mae:', '0.28547075'
-# model6, r = train(torch_dataset_train, torch_dataset_test, str(i), model5)# 'epoch:', '990', 'r2:', '0.6116999119678792', 'r:', '0.7822556388362067', 'mse:', '0.14422134', 'mae:', '0.28109318'
-# model7 = DTA(2307)
-# model7.load_state_dict(torch.load('.\JJH\predictions\DDTA_att_all_EL2\\4e5w\\4e5wbest_r0.7822556388362067_mse0.14422134.mdl'))
-# model8, r = train(torch_dataset_train, torch_dataset_test, str(i), model7)
-#
-#
-# model3, r = train(torch_dataset_train2, torch_dataset_test2, str(i), model)
-#
-# alltest_Y=torch.tensor([[0]])
-# alltest_pre=torch.tensor([[0]])
-# for i in pdb:
-#     # train_i = train_df.loc[train_df['pdb'] == i]
-#     # train_Yi = torch.from_numpy(train_i[['ba']].values)
-#     # train_Xi = train_i.drop(
-#     #     ['pdb', 'variant fold name', 'ligand_file', 'chembl_id', 'tanimoto_index', 'ba', 'RuleOfFiveDescriptor'],
-#     #     axis=1)
-#     # train_Xi = torch.from_numpy(train_Xi.values)
-#     # # 对张量进行最小-最大归一化，需要注意分母不能为0
-#     # # trainmin_values = torch.min(train_Xi, dim=0).values
-#     # # trainmax_values = torch.max(train_Xi, dim=0).values
-#     # train_Xi_normal = (train_Xi - alltrainmin_values) / (alltrainmax_values - alltrainmin_values)
-#     # train_Xi_normal = torch.where(torch.isnan(train_Xi_normal), torch.full_like(train_Xi_normal, 0), train_Xi_normal)
-#     # train_Xi_normal, train_Yi = train_Xi_normal.to(torch.float32), train_Yi.to(torch.float32)
-#
-#     test_i = test_df.loc[test_df['pdb'] == i]
-#     test_Yi = torch.from_numpy(test_i[['ba']].values)
-#     test_Xi = test_i.drop(
-#         ['pdb', 'variant fold name', 'ligand_file', 'chembl_id', 'tanimoto_index', 'ba', 'RuleOfFiveDescriptor'],
-#         axis=1)
-#     test_Xi = torch.from_numpy(test_Xi.values)
-#     # 对张量进行最小-最大归一化，需要注意分母不能为0
-#     # testmin_values = torch.min(test_Xi, dim=0).values
-#     # testmax_values = torch.max(test_Xi, dim=0).values
-#     test_Xi_normal = (test_Xi - alltestmin_values) / (alltestmax_values - alltestmin_values)
-#     test_Xi_normal = torch.where(torch.isnan(test_Xi_normal), torch.full_like(test_Xi_normal, 0), test_Xi_normal)
-#     test_Xi_normal, test_Yi = test_Xi_normal.to(torch.float32), test_Yi.to(torch.float32)
-#
-#     model = DTA(2307)
-#     # if i == '4e5w':
-#     #     model.load_state_dict(torch.load('.\JJH\predictions\DTA_att_all_EL2\\4e5w\\4e5wbest_r_0.7841476529546667_mse0.1435155epoch999.mdl'))
-#     # elif i == '3up2':
-#     #     model.load_state_dict(torch.load('.\JJH\predictions\DTA_att_all_EL2\\3up2\\3up2best_r_0.8542353974334358_mse0.15890177epoch987.mdl'))
-#     # elif i == '3fv1':
-#     #     model.load_state_dict(torch.load('.\JJH\predictions\DTA_att_all_EL2\\3fv1\\3fv1best_r_0.8542476072373946_mse0.1559665epoch972.mdl'))
-#     # elif i == '3b5r':
-#     #     model.load_state_dict(torch.load('.\JJH\predictions\DTA_att_all_EL2\\3b5r\\3b5rbest_r_0.8497951746846897_mse0.26174113epoch989.mdl'))
-#     # elif i == '5a7b':
-#     #     model.load_state_dict(torch.load('.\JJH\predictions\DTA_att_all_EL\\5a7b\\5a7bbest_r_0.8376907440030024_mse0.106933594epoch972.mdl'))
-#     if i == '4e5w':
-#         model.load_state_dict(torch.load('.\JJH\predictions\DTA_att_all_EL\\4e5w\\4e5wbest_r0.7844631032818306_mse0.14314522.mdl'))
-#     elif i == '3up2':
-#         model.load_state_dict(torch.load('.\JJH\predictions\DTA_att_all_EL\\3up2\\3up2best_r_0.81145532010277_mse0.2019219epoch994.mdl'))
-#     elif i == '3fv1':
-#         model.load_state_dict(torch.load('.\JJH\predictions\DTA_att_all_EL\\3fv1\\3fv1best_r_0.8275989799865692_mse0.1823363epoch934.mdl'))
-#     elif i == '3b5r':
-#         model.load_state_dict(torch.load('.\JJH\predictions\DTA_att_all_EL\\3b5r\\3b5rbest_r_0.848661490281699_mse0.2634992epoch994.mdl'))
-#     elif i == '5a7b':
-#         model.load_state_dict(torch.load('.\JJH\predictions\DTA_att_all_EL\\5a7b\\5a7bbest_r_0.8376907440030024_mse0.106933594epoch972.mdl'))
-#     # if i == '4twp':
-#     #     model.load_state_dict(torch.load('.\JJH\predictions\DDTA_att_all_EL2\\4twp\\4twp.mdl'))
-#     else:
-#         model.load_state_dict(torch.load('.\JJH\predictions\DTA1_att_all\\DTA1_att_allbest_r0.9531907406584055_mse0.20353971.mdl'))
-#
-#     test_pre = model(test_Xi_normal)
-#     alltest_pre = torch.cat((alltest_pre, test_pre), dim=0)
-#     alltest_Y = torch.cat((alltest_Y, test_Yi), dim=0)
-#     # 评价指标
-#     pearson = pearsonr(test_Yi.detach().numpy().flatten(), test_pre.detach().numpy().flatten())[0]
-#     # pdbrvalue.append(pearson)
-#     r2 = metrics.r2_score(test_Yi.detach().numpy(), test_pre.detach().numpy())
-#     mae = metrics.mean_absolute_error(test_Yi.detach().numpy(), test_pre.detach().numpy())
-#     mse = metrics.mean_squared_error(test_Yi.detach().numpy(), test_pre.detach().numpy())
-#     rmse = np.sqrt(metrics.mean_squared_error(test_Yi.detach().numpy(), test_pre.detach().numpy()))
-#     rae = metrics.mean_absolute_error(test_Yi.detach().numpy(),
-#                                       test_pre.detach().numpy()) / metrics.mean_absolute_error(
-#         test_Yi.detach().numpy(), [test_Yi.detach().numpy().mean()] * len(test_Yi.detach().numpy()))
-#     rrse = np.sqrt(metrics.mean_squared_error(test_Yi.detach().numpy(), test_pre.detach().numpy())) / np.sqrt(
-#         metrics.mean_squared_error(test_Yi.detach().numpy(),
-#                                    [test_Yi.detach().numpy().mean()] * len(test_Yi.detach().numpy())))
-#     print("==================================pdb ressult==================================================")
-#     print('pdb:', i, 'r2', r2, 'r', pearson, 'mse:', mse, 'mae:', mae, 'rmse:', rmse, 'rae:', rae,
-#           'rrse:', rrse)
-# # 全部评价指标
-# alltest_Y=alltest_Y[1:,:]
-# alltest_pre =alltest_pre[1:,:]
-# pearson = pearsonr(alltest_Y.detach().numpy().flatten(), alltest_pre.detach().numpy().flatten())[0]
-# r2 = metrics.r2_score(alltest_Y.detach().numpy(), alltest_pre.detach().numpy())
-# mae = metrics.mean_absolute_error(alltest_Y.detach().numpy(), alltest_pre.detach().numpy())
-# mse = metrics.mean_squared_error(alltest_Y.detach().numpy(), alltest_pre.detach().numpy())
-# rmse = np.sqrt(metrics.mean_squared_error(alltest_Y.detach().numpy(), alltest_pre.detach().numpy()))
-# rae = metrics.mean_absolute_error(alltest_Y.detach().numpy(),
-#                                   alltest_pre.detach().numpy()) / metrics.mean_absolute_error(
-#     alltest_Y.detach().numpy(), [alltest_Y.detach().numpy().mean()] * len(alltest_Y.detach().numpy()))
-# rrse = np.sqrt(metrics.mean_squared_error(alltest_Y.detach().numpy(), alltest_pre.detach().numpy())) / np.sqrt(
-#     metrics.mean_squared_error(alltest_Y.detach().numpy(),
-#                                [alltest_Y.detach().numpy().mean()] * len(alltest_Y.detach().numpy())))
-# print("==================================all pdb ressult==================================================")
-# print('r2', r2, 'r', pearson, 'mse:', mse, 'mae:', mae, 'rmse:', rmse, 'rae:', rae,'rrse:', rrse)
+        model = DeepDTA2(2307,attention_weight1)
+        model2,r=train(torch_dataset1, torch_dataset2, 'MPLBind_DL',model)
+        results=test( torch_dataset3, 'MPLBind_DL',model2)
