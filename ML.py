@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import GridSearchCV
 from sklearn.preprocessing import StandardScaler
+from lifelines.utils import concordance_index
 
 #数据处理
 def prepareDataFrame(df, categorical_features):
@@ -299,32 +300,20 @@ def comparePS(model_name,proteinfeature):
     return final_metrics, regressor
 
 #评估
-#非常费时间，最后评估时候使用即可
-def get_cindex(Y, P):
-    summ = 0
-    pair = 0
-    for i in range(1, len(Y)):
-        for j in range(0, i):
-            if i is not j:
-                if (Y[i] > Y[j]):
-                    pair += 1
-                    summ += 1 * (P[i] > P[j]) + 0.5 * (P[i] == P[j])
-    if pair is not 0:
-        return summ / pair
-    else:
-        return 0
-
 def evaluate(model, test_features, test_labels, model_type):
     predictions = model.predict(test_features)
-
     pred_dict = {'observed': test_labels, 'predicted': predictions}
-
     pred_df = pd.DataFrame(pred_dict)
     pred_df.to_csv("./predictions/" + model_type + ".csv", encoding="utf-8", index=False)
 
     pearson_r = scipy.stats.pearsonr(test_labels, predictions)
     print('Pearson R: ', pearson_r)
     print('Pearson R squared: ', pearson_r[0] ** 2)
+    cindex = concordance_index(test_labels, predictions)
+    slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(predictions, test_labels)  # 斜率 截距 R2
+    sd = np.sqrt(np.sum((test_labels - slope * predictions + intercept) ** 2) / (len(test_labels) - 1))
+    print('CI:',cindex)
+    print('SD:',sd)
 
     r2 = metrics.r2_score(test_labels, predictions)
     mae = metrics.mean_absolute_error(test_labels, predictions)
