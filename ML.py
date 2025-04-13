@@ -1,7 +1,6 @@
 '''
 原论文中机器学习模型预测突变蛋白质-配体结合亲和力
 '''
-
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import Ridge
@@ -299,9 +298,7 @@ def comparePS(model_name,proteinfeature):
 
     return final_metrics, regressor
 
-
 #评估
-
 #非常费时间，最后评估时候使用即可
 def get_cindex(Y, P):
     summ = 0
