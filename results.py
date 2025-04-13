@@ -104,7 +104,57 @@ def getproteinsequencesim():
 
     drawheatmap(proteinseqsimarray, 'protein_sequence_cosinesim_heatmap')
 
+#绘制相关系数分布图
+def drawplot(true_Y,pred_Y,name):
+    pearson_r = scipy.stats.pearsonr(true_Y,pred_Y)
+    # 线性拟合（1次多项式）
+    coefficients = np.polyfit(true_Y,pred_Y, 1)
+    poly = np.poly1d(coefficients)
+    fit_line = poly(true_Y)
+    # 拟合公式文本
+    fit_formula = f'y={coefficients[0]:.4f}x+{coefficients[1]:.4f}'
+    # 创建画布
+    plt.figure(figsize=(8, 6))
+    # 绘制散点图
+    sns.set(style='ticks')
+    ax = sns.scatterplot(
+        x=true_Y,
+        y=pred_Y,
+        s=5,
+        color='#379ADD',
+        linewidth=0,  # 关键参数：去除边缘线
+        edgecolor=None
+    )
 
+    # 绘制拟合曲线
+    plt.plot(
+        true_Y,
+        fit_line,
+        color='#1f77b4',
+        linestyle='-',
+        linewidth=1,
+        label=fit_formula
+    )
+    #横纵坐标轴范围和区别
+    plt.xlim((-5.5, 4.5))
+    plt.ylim((-5, 4.5))
+    my_x_ticks = np.arange(-5.5, 4.6, 1.0)
+    my_y_ticks = np.arange(-5, 4.6, 1.0)
+    plt.xticks(my_x_ticks)
+    plt.yticks(my_y_ticks)
+
+    # 标题和坐标轴
+    # plt.xlabel('True Binding Affinity', fontsize=12)
+    # plt.ylabel('Predicted Binding Affinity', fontsize=12)
+    plt.xlabel('True effect of mutation on Binding Affinity', fontsize=16)
+    plt.ylabel('Predicted effect of mutation on Binding Affinity', fontsize=16)
+
+    # 添加图例和统计指标
+    plt.legend(loc='upper left',fontsize=16)
+
+    plt.tight_layout()
+    plt.savefig('./figure/result/'+name+'.tiff', dpi=300)
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -119,3 +169,5 @@ if __name__ == "__main__":
     drawbindingfrequencyall(dockingstatisticsdf)
 
     chemicalfeaturesdf = pd.read_csv("./data/PsnpBind/process/chemicalfeaturesdf36373_1167.csv", index_col=0)
+
+
